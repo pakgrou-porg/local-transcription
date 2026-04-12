@@ -1,0 +1,12 @@
+# ════════════════════════════════════════════════════════════
+# Text Substitutions — Name Normalization
+# ════════════════════════════════════════════════════════════
+# Format: CanonicalName=regex_alt1|regex_alt2|regex_alt3
+# The regex on the RIGHT is matched (case-insensitive) and replaced
+# with the canonical name on the LEFT.
+# Blank lines and lines starting with # are ignored.
+# ════════════════════════════════════════════════════════════
+
+Karl=Carl|Carul|Kharel
+Michael=Micheal|Mikael|Mikhail
+Stephanie=Stefanie|Stephany|Stefany

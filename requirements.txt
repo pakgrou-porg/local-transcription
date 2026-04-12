@@ -1,0 +1,18 @@
+# Transcription Pipeline — Python Dependencies
+# Install: pip install -r requirements.txt
+# System dependency: ffmpeg must be on PATH (apt install ffmpeg)
+
+# Google APIs
+google-auth>=2.20.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.1.0
+google-api-python-client>=2.90.0
+
+# Supabase
+supabase>=2.0.0
+
+# HTTP requests
+requests>=2.31.0
+
+# Environment
+python-dotenv>=1.0.0
