@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -81,7 +82,7 @@ def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
         scopes=SCOPES,
     )
 
-    # Generate authorization URL with code challenge (PKCE)
+    # Generate authorization URL with PKCE (no redirect_uri needed for desktop apps)
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
@@ -97,26 +98,27 @@ def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
     print("\n" + auth_url + "\n")
     print("2. Sign in and click 'Allow' to authorize the app")
     print("3. After authorizing, you will be redirected to a localhost URL")
-    print("4. Copy the FULL redirect URL (starts with http://localhost:8080)")
+    print("   (you may see 'Connection refused' or 'Page not found' — that's OK!)")
+    print("4. Copy the FULL redirect URL from your browser's address bar")
+    print("   (starts with http://localhost or http://127.0.0.1)")
     print("5. Paste it back into this terminal\n")
     print("=" * 70)
 
     # Get the redirect URL from user input
     redirect_url = input("Paste the redirect URL here: ").strip()
 
-    if not redirect_url or not redirect_url.startswith("http://localhost"):
-        print("\nError: Invalid redirect URL. Please restart the pipeline.")
+    if not redirect_url or not redirect_url.startswith("http://localhost") and not redirect_url.startswith("http://127.0.0.1"):
+        print("\nError: Invalid redirect URL. Must start with http://localhost or http://127.0.0.1")
         raise ValueError("Invalid redirect URL provided")
 
     # Extract the authorization code from the redirect URL
-    from urllib.parse import parse_qs, urlparse
-
     parsed = urlparse(redirect_url)
     params = parse_qs(parsed.query)
     auth_code = params.get("code", [None])[0]
 
     if not auth_code:
         print("\nError: No authorization code found in the redirect URL.")
+        print(f"URL provided: {redirect_url[:100]}...")
         raise ValueError("No authorization code in redirect URL")
 
     # Exchange the authorization code for tokens
