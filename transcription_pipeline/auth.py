@@ -43,6 +43,11 @@ def _save_credentials(creds: Credentials, token_file: str) -> None:
 def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
     """Return valid Google OAuth2 credentials, launching auth flow if needed.
 
+    This function supports headless servers by:
+    1. Printing the authorization URL for manual copy/paste
+    2. Accepting the authorization code from the redirect URL
+    3. Exchanging the code for tokens
+
     Parameters
     ----------
     client_secrets_file : str
@@ -75,28 +80,51 @@ def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
         client_secrets_file,
         scopes=SCOPES,
     )
-    # Print the authorization URL before attempting to open browser
+
+    # Generate authorization URL with code challenge (PKCE)
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         prompt="consent",
+        include_granted_scopes="true",
     )
-    print(
-        "\n" + "="*70 +
-        "\nAUTHORIZATION REQUIRED" +
-        "\n" + "="*70 +
-        "\n\nPlease open this URL in your browser to authorize the app:" +
-        "\n\n" + auth_url +
-        "\n\n" + "="*70 +
-        "\nAfter authorizing, you will be redirected to localhost:XXXX" +
-        "\nIf using SSH port forwarding, ensure the tunnel is active." +
-        "\n" + "="*70 + "\n"
-    )
-    creds = flow.run_local_server(
-        port=0,
-        access_type="offline",
-        prompt="consent",
-    )
+
+    # Print the URL for manual authorization
+    print("\n" + "=" * 70)
+    print("AUTHORIZATION REQUIRED")
+    print("=" * 70)
+    print("\nPlease complete these steps:\n")
+    print("1. Copy this URL into your browser:")
+    print("\n" + auth_url + "\n")
+    print("2. Sign in and click 'Allow' to authorize the app")
+    print("3. After authorizing, you will be redirected to a localhost URL")
+    print("4. Copy the FULL redirect URL (starts with http://localhost:8080)")
+    print("5. Paste it back into this terminal\n")
+    print("=" * 70)
+
+    # Get the redirect URL from user input
+    redirect_url = input("Paste the redirect URL here: ").strip()
+
+    if not redirect_url or not redirect_url.startswith("http://localhost"):
+        print("\nError: Invalid redirect URL. Please restart the pipeline.")
+        raise ValueError("Invalid redirect URL provided")
+
+    # Extract the authorization code from the redirect URL
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(redirect_url)
+    params = parse_qs(parsed.query)
+    auth_code = params.get("code", [None])[0]
+
+    if not auth_code:
+        print("\nError: No authorization code found in the redirect URL.")
+        raise ValueError("No authorization code in redirect URL")
+
+    # Exchange the authorization code for tokens
+    flow.fetch_token(code=auth_code)
+    creds = flow.credentials
     _save_credentials(creds, token_file)
+
+    print("\n✓ Authorization successful! Credentials saved.")
     return creds
 
 
