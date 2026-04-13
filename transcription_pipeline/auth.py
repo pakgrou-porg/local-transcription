@@ -75,6 +75,22 @@ def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
         client_secrets_file,
         scopes=SCOPES,
     )
+    # Print the authorization URL before attempting to open browser
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+    )
+    print(
+        "\n" + "="*70 +
+        "\nAUTHORIZATION REQUIRED" +
+        "\n" + "="*70 +
+        "\n\nPlease open this URL in your browser to authorize the app:" +
+        "\n\n" + auth_url +
+        "\n\n" + "="*70 +
+        "\nAfter authorizing, you will be redirected to localhost:XXXX" +
+        "\nIf using SSH port forwarding, ensure the tunnel is active." +
+        "\n" + "="*70 + "\n"
+    )
     creds = flow.run_local_server(
         port=0,
         access_type="offline",
