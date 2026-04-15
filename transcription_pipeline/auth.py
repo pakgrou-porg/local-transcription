@@ -7,8 +7,8 @@ import os
 import socket
 import socketserver
 import threading
-import webbrowser
-from urllib.parse import parse_qs, urlparse
+import time
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -87,23 +87,13 @@ class _OAuthRedirectHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def _find_open_port(start_port: int, max_attempts: int = 10) -> int:
-    """Find an open port starting from start_port."""
-    for port in range(start_port, start_port + max_attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            try:
-                s.bind(("", port))
-                return port
-            except OSError:
-                continue
-    raise OSError(f"Could not find open port in range {start_port}-{start_port + max_attempts}")
-
-
 def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
     """Return valid Google OAuth2 credentials, launching auth flow if needed.
 
     This function supports headless servers by starting a local HTTP server
     to capture the OAuth redirect automatically.
+
+    Uses http://localhost as the redirect URI (matching desktop OAuth client config).
 
     Parameters
     ----------
@@ -138,71 +128,62 @@ def get_credentials(client_secrets_file: str, token_file: str) -> Credentials:
         scopes=SCOPES,
     )
 
-    # Find an open port and start HTTP server to capture redirect
-    port = _find_open_port(8080)
-    handler = _OAuthRedirectHandler
+    # Use http://localhost as redirect URI (matches the configured OAuth client)
+    redirect_uri = "http://localhost"
 
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        # Generate authorization URL pointing to our local server
-        auth_url, _ = flow.authorization_url(
-            access_type="offline",
-            prompt="consent",
-            include_granted_scopes="true",
-        )
+    # Generate authorization URL with the configured redirect_uri
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+        redirect_uri=redirect_uri,
+    )
 
-        # Replace the redirect port in the URL with our actual port
-        parsed_auth = urlparse(auth_url)
-        auth_params = parse_qs(parsed_auth.query)
-        auth_params["redirect_uri"] = [f"http://localhost:{port}"]
+    # Print the URL for manual authorization
+    print("\n" + "=" * 70)
+    print("AUTHORIZATION REQUIRED")
+    print("=" * 70)
+    print("\nPlease complete these steps:\n")
+    print("1. Copy this URL into your browser:")
+    print("\n" + auth_url + "\n")
+    print("2. Sign in and click 'Allow' to authorize the app")
+    print("3. Wait ~5 seconds after seeing the success page")
+    print("4. This script will automatically continue...\n")
+    print("=" * 70)
 
-        # Rebuild the URL with the correct redirect_uri
-        from urllib.parse import urlencode
+    # Start HTTP server in a thread (listening on all interfaces)
+    httpd = socketserver.TCPServer(("", 0), _OAuthRedirectHandler)
+    port = httpd.server_address[1]
+    server_thread = threading.Thread(target=httpd.serve_forever)
+    server_thread.daemon = True
+    server_thread.start()
 
-        new_query = urlencode(auth_params, doseq=True)
-        auth_url = f"{parsed_auth.scheme}://{parsed_auth.netloc}{parsed_auth.path}?{new_query}"
+    print(f"\nWaiting for authorization (server listening on port {port})...")
+    print("Leave this terminal window open while you authorize in your browser.\n")
 
-        # Print the URL for manual authorization
-        print("\n" + "=" * 70)
-        print("AUTHORIZATION REQUIRED")
-        print("=" * 70)
-        print("\nPlease complete these steps:\n")
-        print("1. Copy this URL into your browser:")
-        print("\n" + auth_url + "\n")
-        print("2. Sign in and click 'Allow' to authorize the app")
-        print("3. After authorizing, you'll see a success page")
-        print("4. This script will automatically continue...\n")
-        print("=" * 70)
+    # Wait for the auth code to be received
+    timeout_seconds = 300  # 5 minutes
+    start_time = time.time()
 
-        # Start HTTP server in a thread
-        server_thread = threading.Thread(target=httpd.serve_forever)
-        server_thread.daemon = True
-        server_thread.start()
+    while _OAuthRedirectHandler.auth_code is None and _OAuthRedirectHandler.error is None:
+        if time.time() - start_time > timeout_seconds:
+            httpd.shutdown()
+            raise TimeoutError("Authorization timeout - took too long to complete")
+        time.sleep(0.5)
 
-        print(f"\nWaiting for authorization (server listening on port {port})...")
+    httpd.shutdown()
 
-        # Wait for the auth code to be received
-        timeout_seconds = 300  # 5 minutes
-        start_time = __import__("time").time()
+    if _OAuthRedirectHandler.error:
+        raise ValueError(f"OAuth error: {_OAuthRedirectHandler.error}")
 
-        while handler.auth_code is None and handler.error is None:
-            if __import__("time").time() - start_time > timeout_seconds:
-                httpd.shutdown()
-                raise TimeoutError("Authorization timeout - took too long to complete")
-            __import__("time").sleep(0.5)
+    # Exchange the authorization code for tokens
+    print("\nAuthorization code received! Exchanging for tokens...")
+    flow.fetch_token(code=_OAuthRedirectHandler.auth_code)
+    creds = flow.credentials
+    _save_credentials(creds, token_file)
 
-        httpd.shutdown()
-
-        if handler.error:
-            raise ValueError(f"OAuth error: {handler.error}")
-
-        # Exchange the authorization code for tokens
-        print("Authorization code received! Exchanging for tokens...")
-        flow.fetch_token(code=handler.auth_code)
-        creds = flow.credentials
-        _save_credentials(creds, token_file)
-
-        print("\n✓ Authorization successful! Credentials saved.")
-        return creds
+    print("\n✓ Authorization successful! Credentials saved.")
+    return creds
 
 
 def build_drive_service(creds: Credentials):
