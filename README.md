@@ -42,9 +42,9 @@ copy .env.example .env
 
 ### 3. Run Tests
 ```powershell
-pytest tests/test_pipeline_integration.py -q
-pytest tests/test_pipeline_functional.py -q
-pytest tests/ -q
+python -m pytest tests/test_pipeline_integration.py -q
+python -m pytest tests/test_pipeline_functional.py -q
+python -m pytest tests/ -q
 ```
 
 ## Deployment Instructions
@@ -70,9 +70,13 @@ pytest tests/ -q
 4. Test authentication by running `python main.py normal` once to trigger OAuth2 flow.
 
 ### Running the Pipeline
-- **Manual Execution**:
-  - Normal mode: `python main.py normal`
-  - Batch mode: `python main.py batch --ids 1,2,3` (or other filters)
+All production and maintenance flows run through `main.py`.
+
+- **Normal mode**: `python main.py normal`
+- **Batch by IDs**: `python main.py batch --ids 1,2,3`
+- **Batch by state**: `python main.py batch --status error`
+- **Batch by recent records**: `python main.py batch --recent 20`
+- **Batch by month**: `python main.py batch --month 2026-04`
 
 - **From Scripts**:
   - Create a batch script (Windows) or shell script (Linux) to run the pipeline.
@@ -120,9 +124,14 @@ Reprocess existing records from Supabase by filter.
 ```powershell
 python main.py batch --ids 1,2,3
 python main.py batch --filename "meeting"
-python main.py batch --status "error"
-python main.py batch --month "2026-04"
+python main.py batch --status error
+python main.py batch --status new
+python main.py batch --status transcribed
+python main.py batch --month 2026-04
+python main.py batch --recent 20
 ```
+
+Rows with state `error` or `new`, missing transcript text, or invalid transcript text are rebuilt from the stored Google Drive file ID. The pipeline downloads the recording from `ai_sources` or `archive`, preprocesses it, retranscribes it, applies substitutions, summarizes it, renders HTML, sends email, archives the Drive file, and updates Supabase.
 
 ## Pipeline Behavior
 - `pipeline.py` performs startup recovery for interrupted jobs
