@@ -420,8 +420,8 @@ async def run_normal_pipeline() -> bool:
 
     16-step pipeline:
     1-4: Load config, authenticate, check startup recovery
-    5-9: Download, preprocess, transcribe, substitute
-    10-14: Summarize, render, email, update state, archive
+    5-9: Download, preprocess, transcribe, archive
+    9-14: Archive, summarize, render, email, update state
     15-16: Log completion, return
     """
     logger.info("=" * 70)
@@ -556,8 +556,16 @@ async def run_normal_pipeline() -> bool:
             supabase_url, service_key, table, record_id, "transcribed"
         )
 
-        # STEP[9]: Apply substitutions
-        logger.info("STEP[9]: Applying text substitutions")
+        # STEP[9]: Move to archive after successful transcription
+        logger.info("STEP[9]: Moving file to archive after transcription")
+        if not await archive_drive_file(
+            drive_service, file_id, source_folder_id, archive_folder_name
+        ):
+            logger.error("Archive failed")
+            return False
+
+        # STEP[10]: Apply substitutions
+        logger.info("STEP[10]: Applying text substitutions")
         try:
             transcript = await apply_configured_substitutions(
                 supabase_url, service_key, table, record_id, transcript, persist=True
@@ -565,8 +573,8 @@ async def run_normal_pipeline() -> bool:
         except Exception as e:
             logger.warning(f"Substitution warning (continuing): {e}")
 
-        # STEP[10]: Summarize
-        logger.info("STEP[10]: Summarizing transcript")
+        # STEP[11]: Summarize
+        logger.info("STEP[11]: Summarizing transcript")
         client = summarize.build_from_env()
         summary_dict = client.summarize(transcript, timeout=get_summarizer_timeout())
         if not summary_dict:
@@ -583,8 +591,8 @@ async def run_normal_pipeline() -> bool:
             supabase_url, service_key, table, record_id, json.dumps(summary_dict)
         )
 
-        # STEP[11]: Render HTML
-        logger.info("STEP[11]: Rendering summary to HTML")
+        # STEP[12]: Render HTML
+        logger.info("STEP[12]: Rendering summary to HTML")
         html = render.render_summary_to_html(summary_dict)
         if not html:
             logger.error("HTML rendering failed")
@@ -596,14 +604,6 @@ async def run_normal_pipeline() -> bool:
         await supabase_db.update_html(
             supabase_url, service_key, table, record_id, html
         )
-
-        # STEP[12]: Move to archive before delivery completion
-        logger.info("STEP[12]: Moving file to archive")
-        if not await archive_drive_file(
-            drive_service, file_id, source_folder_id, archive_folder_name
-        ):
-            logger.error("Archive failed")
-            return False
 
         # STEP[13]: Send email
         logger.info("STEP[13]: Sending summary email")

@@ -138,11 +138,11 @@ Rows with state `error` or `new`, missing transcript text, or invalid transcript
 - downloads audio from Drive
 - preprocesses to 16kHz mono
 - transcribes and validates transcript text
+- archives newly discovered audio after successful transcription
 - applies substitutions
 - summarizes with LLM
 - renders HTML
 - sends email via Gmail
-- archives the processed file
 - updates Supabase state at each stage
 
 ## Shared Summary Schema

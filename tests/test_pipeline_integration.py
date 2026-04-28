@@ -87,7 +87,7 @@ def configure_pipeline_success_mocks(
 
 class TestNormalPipeline:
     @pytest.mark.asyncio
-    async def test_normal_pipeline_archives_before_email_and_completion(
+    async def test_normal_pipeline_archives_after_transcription_before_email(
         self, google_services, summary_dict, tmp_path
     ):
         events = []
@@ -101,9 +101,32 @@ class TestNormalPipeline:
                 p.stop()
 
         assert success is True
+        assert events.index("state:transcribed") < events.index("archive")
         assert events.index("archive") < events.index("email")
         assert events.index("email") < events.index("state:html")
         stack[11].assert_called_once_with()
+        stack[17].assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_normal_pipeline_archives_after_transcription_when_summary_fails(
+        self, google_services, summary_dict, tmp_path
+    ):
+        events = []
+        patches, stack = configure_pipeline_success_mocks(
+            google_services, summary_dict, tmp_path, events
+        )
+        stack[11].return_value.summarize.return_value = None
+
+        try:
+            success = await pipeline.run_normal_pipeline()
+        finally:
+            for p in reversed(patches):
+                p.stop()
+
+        assert success is False
+        assert events.index("state:transcribed") < events.index("archive")
+        assert events.index("archive") < events.index("state:error")
+        assert "email" not in events
         stack[17].assert_called_once()
 
     @pytest.mark.asyncio
