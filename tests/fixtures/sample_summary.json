@@ -1,0 +1,43 @@
+{
+  "meeting_subject": "Q2 Strategic Planning and Resource Allocation",
+  "speakers": [
+    "John Smith",
+    "Sarah Johnson",
+    "Mike Chen",
+    "Karen Williams"
+  ],
+  "action_items": [
+    {
+      "assigned_to": "Sarah Johnson",
+      "action": "Complete Q2 product roadmap document and share with stakeholders"
+    },
+    {
+      "assigned_to": "Mike Chen",
+      "action": "Assess technical feasibility of new architecture proposals"
+    },
+    {
+      "assigned_to": "Karen Williams",
+      "action": "Coordinate resource planning for Q3 hires and budget allocation"
+    },
+    {
+      "assigned_to": "John Smith",
+      "action": "Schedule follow-up meeting for implementation timeline review"
+    }
+  ],
+  "discussion_topics": [
+    "Product roadmap updates for Q2 and Q3",
+    "Customer feedback analysis from recent survey",
+    "Engineering resource requirements and capacity planning",
+    "Marketing strategy and campaign planning",
+    "Budget allocation for operational expenses",
+    "Timeline for product feature releases",
+    "Team training and professional development opportunities"
+  ],
+  "resourcing": [
+    "2 additional engineering resources for backend development",
+    "1 UX/UI designer for mobile application redesign",
+    "Budget allocation: $50,000 for infrastructure upgrades",
+    "Contract resources: external consulting for architecture review",
+    "Q2 training budget: $15,000 for employee development"
+  ]
+}

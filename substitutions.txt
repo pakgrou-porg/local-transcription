@@ -1,0 +1,27 @@
+# Format: CanonicalName=alt1|alt2|alt3
+# RIGHT side matched (case-insensitive). LEFT side is the replacement.
+Karl=Carl|Carul|Kharel
+Apurv=Apoorv|Epoorv|Apurva
+Bipin=Vipin|Bippin|Bibbin
+CACL=Cackle|Kaccle|Caccle
+Hayk=Hayek|Hike
+Jae\'s CP=JCP
+Jae=Jay|Js
+Jaya=Jia|Jawa|Jiya|Jaa|Haea|Jaia|Jya
+Jeppe=Yuppa|Jeppa|Juppa|Yeppa|Yepa|Yaapa
+Kanishk=Kanish
+Krovi=Khovi|Crovy|Krovy
+Mukarram=Mukaram|Mukram|Mugram
+OCAM=Okam|OCAM
+OHAI=Ohai|Ohi
+OTIS=Otis
+Oracle=Oricle|Oracal|Orakle
+Praveen=Pravin
+Raju=Raji
+Shasi=Shasie|Chasie|Shasea|Shahsea|Shashi|Chassy|Shashy
+SDP=Essdeepee
+Sumit=Sumitt
+Supabase=Supa Base|Supa-Base|SupaBase
+Wojtek=Voitech|Voytek|Voitek
+XSOAR=Xor|Exxor
+ZPR=Zipper
