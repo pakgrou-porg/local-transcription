@@ -638,6 +638,82 @@ async def run_normal_pipeline() -> bool:
     return True
 
 
+async def count_source_audio_files() -> Optional[int]:
+    """Return the current number of audio files waiting in the source folder."""
+    source_folder_name = os.getenv("DRIVE_SOURCE_FOLDER", "Transcription Source")
+
+    try:
+        drive_service, _ = auth.load_or_refresh_credentials()
+        if not drive_service:
+            logger.error("Authentication failed while counting source audio files")
+            return None
+
+        source_folder_id = drive.resolve_source_folder_id(
+            drive_service, source_folder_name
+        )
+        if not source_folder_id:
+            logger.error("Could not resolve source folder while counting audio files")
+            return None
+
+        return len(drive.list_audio_files(drive_service, source_folder_id))
+    except Exception as e:
+        logger.error(f"Failed to count source audio files: {e}")
+        return None
+
+
+async def run_all_source_files(limit: Optional[int] = None) -> int:
+    """
+    Drain audio files from the source folder by repeatedly running normal mode.
+
+    Returns the number of source files that were removed from the source folder.
+    """
+    logger.info("=" * 70)
+    logger.info("STARTING SOURCE BACKLOG DRAIN")
+    logger.info("=" * 70)
+
+    processed = 0
+    iterations = 0
+
+    while limit is None or iterations < limit:
+        before_count = await count_source_audio_files()
+        if before_count is None:
+            break
+        if before_count == 0:
+            logger.info("Source backlog is empty")
+            break
+
+        logger.info(
+            "Source backlog drain iteration %s: %s audio file(s) remaining",
+            iterations + 1,
+            before_count,
+        )
+
+        success = await run_normal_pipeline()
+        if not success:
+            logger.error("Stopping source backlog drain after processing failure")
+            break
+
+        after_count = await count_source_audio_files()
+        if after_count is None:
+            break
+        if after_count < before_count:
+            processed += before_count - after_count
+            if after_count == 0:
+                logger.info("Source backlog is empty")
+                break
+        else:
+            logger.warning(
+                "Source backlog count did not decrease; stopping to avoid loop"
+            )
+            break
+
+        iterations += 1
+
+    logger.info("Source backlog drain complete: %s file(s) processed", processed)
+    logger.info("=" * 70)
+    return processed
+
+
 async def run_batch_pipeline(filter_type: str, value: str) -> int:
     """
     Batch reprocess pipeline: re-summarize, re-render, re-send.

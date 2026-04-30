@@ -61,6 +61,16 @@ def create_parser():
         "normal",
         help="Run normal cron-driven pipeline (process first file in source folder)"
     )
+    normal_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Process all currently queued audio files in the source folder"
+    )
+    normal_parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of source audio files to process with --all"
+    )
     
     # Batch reprocess command
     batch_parser = subparsers.add_parser(
@@ -116,6 +126,16 @@ def main():
     if args.command == "normal":
         logger.info("Normal pipeline mode selected")
         try:
+            if args.all:
+                processed = asyncio.run(pipeline.run_all_source_files(args.limit))
+                if processed > 0:
+                    logger.info(
+                        f"Normal backlog pipeline processed {processed} file(s)"
+                    )
+                    sys.exit(0)
+                logger.warning("Normal backlog pipeline completed with no files processed")
+                sys.exit(1)
+
             success = asyncio.run(pipeline.run_normal_pipeline())
             if success:
                 logger.info("Normal pipeline executed successfully")

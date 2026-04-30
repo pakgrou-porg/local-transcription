@@ -95,6 +95,34 @@ class TestTranscriptRebuildPolicy:
 
 class TestRecoveryAndCleanup:
     @pytest.mark.asyncio
+    async def test_run_all_source_files_drains_until_source_empty(self):
+        with patch(
+            "pipeline.count_source_audio_files",
+            new=AsyncMock(side_effect=[2, 1, 1, 0]),
+        ), patch(
+            "pipeline.run_normal_pipeline",
+            new=AsyncMock(return_value=True),
+        ) as mock_normal:
+            processed = await pipeline.run_all_source_files()
+
+        assert processed == 2
+        assert mock_normal.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_run_all_source_files_respects_limit(self):
+        with patch(
+            "pipeline.count_source_audio_files",
+            new=AsyncMock(side_effect=[3, 2]),
+        ), patch(
+            "pipeline.run_normal_pipeline",
+            new=AsyncMock(return_value=True),
+        ) as mock_normal:
+            processed = await pipeline.run_all_source_files(limit=1)
+
+        assert processed == 1
+        assert mock_normal.await_count == 1
+
+    @pytest.mark.asyncio
     async def test_resume_interrupted_job_rebuilds_summary_when_missing(self):
         jobs = [
             {

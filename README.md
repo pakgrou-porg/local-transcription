@@ -73,6 +73,8 @@ python -m pytest tests/ -q
 All production and maintenance flows run through `main.py`.
 
 - **Normal mode**: `python main.py normal`
+- **Process all queued source files**: `python main.py normal --all`
+- **Process a capped source backlog**: `python main.py normal --all --limit 13`
 - **Batch by IDs**: `python main.py batch --ids 1,2,3`
 - **Batch by state**: `python main.py batch --status error`
 - **Batch by recent records**: `python main.py batch --recent 20`
@@ -117,6 +119,8 @@ Ensure the scheduled job has access to the .env file and necessary permissions f
 Process the first audio file in the source folder and execute the end-to-end pipeline.
 ```powershell
 python main.py normal
+python main.py normal --all
+python main.py normal --all --limit 13
 ```
 
 ### Batch reprocessing
