@@ -138,7 +138,8 @@ python main.py batch --recent 20
 Rows with state `error` or `new`, missing transcript text, or invalid transcript text are rebuilt from the stored Google Drive file ID. The pipeline downloads the recording from `ai_sources` or `archive`, preprocesses it, retranscribes it, applies substitutions, summarizes it, renders HTML, sends email, archives the Drive file, and updates Supabase.
 
 ## Pipeline Behavior
-- `pipeline.py` performs startup recovery for interrupted jobs
+- `pipeline.py` performs startup recovery for interrupted and recoverable `error` jobs before processing new source audio
+- startup recovery retries missing or failed transcript, summary, HTML rendering, archive, email delivery, and terminal-state updates based on the row's saved data
 - downloads audio from Drive
 - preprocesses to 16kHz mono
 - transcribes and validates transcript text

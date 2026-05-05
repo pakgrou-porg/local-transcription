@@ -233,6 +233,29 @@ def parse_summary(summary_value: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_summarizer_failure_reason(client: Any) -> str:
+    """Return a useful reason when a summarizer call does not produce output."""
+    return (
+        getattr(client, "last_error", None)
+        or "summarizer returned no summary and did not provide a failure reason"
+    )
+
+
+def summarize_transcript(client: Any, transcript: str, context: str) -> Optional[Dict[str, Any]]:
+    """Summarize transcript and log the concrete failure reason when available."""
+    try:
+        summary_dict = client.summarize(transcript, timeout=get_summarizer_timeout())
+    except Exception as e:
+        logger.exception("%s summarization raised an exception: %s", context, e)
+        return None
+
+    if not summary_dict:
+        logger.error("%s summarization failed: %s", context, get_summarizer_failure_reason(client))
+        return None
+
+    return summary_dict
+
+
 def needs_transcript_rebuild(record: Dict[str, Any], transcript: Optional[str]) -> bool:
     """
     Determine whether a record should be rebuilt from archived audio.
@@ -244,6 +267,21 @@ def needs_transcript_rebuild(record: Dict[str, Any], transcript: Optional[str]) 
     """
     if (record.get("state") or "").lower() == "error":
         return True
+    if not transcript:
+        return True
+    return not transcribe.verify_transcript(transcript)
+
+
+def needs_recovery_transcript_rebuild(
+    transcript: Optional[str],
+    summary_dict: Optional[Dict[str, Any]],
+    html: Optional[str],
+) -> bool:
+    """Startup recovery rebuilds only when needed for the next incomplete stage."""
+    if summary_dict and html:
+        return False
+    if summary_dict:
+        return False
     if not transcript:
         return True
     return not transcribe.verify_transcript(transcript)
@@ -343,6 +381,24 @@ async def resume_interrupted_jobs(
         try:
             logger.info(f"  RESUME: Job {record_id} ({file_name})")
 
+            if needs_recovery_transcript_rebuild(transcript, summary_dict, html):
+                logger.info("    Transcript missing/invalid; rebuilding from Drive...")
+                transcript = await rebuild_transcript_from_archive(
+                    supabase_url,
+                    service_key,
+                    table,
+                    record_id,
+                    file_name,
+                    file_id,
+                    drive_service,
+                )
+                if not transcript:
+                    logger.error("    Transcript rebuild failed; job remains error")
+                    failed += 1
+                    continue
+                summary_dict = None
+                html = None
+
             if not summary_dict:
                 if not transcript:
                     logger.error("    Missing transcript for interrupted job")
@@ -363,11 +419,11 @@ async def resume_interrupted_jobs(
                     logger.warning(f"    Substitution warning (continuing): {e}")
 
                 logger.info("    Summarizing transcript")
-                summary_dict = summarize.build_from_env().summarize(
-                    transcript, timeout=get_summarizer_timeout()
+                client = summarize.build_from_env()
+                summary_dict = summarize_transcript(
+                    client, transcript, f"Recovery job {record_id}"
                 )
                 if not summary_dict:
-                    logger.error("    Summarization failed")
                     failed += 1
                     continue
 
@@ -392,9 +448,22 @@ async def resume_interrupted_jobs(
 
             logger.info("    Sending summary email")
             recipient = get_email_recipient()
-            email_sender.send_summary_email(
-                gmail_service, recipient, get_email_subject(file_name), html
-            )
+            try:
+                email_sender.send_summary_email(
+                    gmail_service, recipient, get_email_subject(file_name), html
+                )
+            except Exception as e:
+                logger.exception(
+                    "    Email delivery failed for job %s to %s: %s",
+                    record_id,
+                    recipient,
+                    e,
+                )
+                await supabase_db.update_state(
+                    supabase_url, service_key, table, record_id, "error"
+                )
+                failed += 1
+                continue
 
             if not await mark_record_completed(
                 supabase_url, service_key, table, record_id
@@ -576,9 +645,8 @@ async def run_normal_pipeline() -> bool:
         # STEP[11]: Summarize
         logger.info("STEP[11]: Summarizing transcript")
         client = summarize.build_from_env()
-        summary_dict = client.summarize(transcript, timeout=get_summarizer_timeout())
+        summary_dict = summarize_transcript(client, transcript, f"Record {record_id}")
         if not summary_dict:
-            logger.error("Summarization failed")
             await supabase_db.update_state(
                 supabase_url, service_key, table, record_id, "error"
             )
@@ -608,9 +676,21 @@ async def run_normal_pipeline() -> bool:
         # STEP[13]: Send email
         logger.info("STEP[13]: Sending summary email")
         recipient = get_email_recipient()
-        email_sender.send_summary_email(
-            gmail_service, recipient, get_email_subject(file_name), html
-        )
+        try:
+            email_sender.send_summary_email(
+                gmail_service, recipient, get_email_subject(file_name), html
+            )
+        except Exception as e:
+            logger.exception(
+                "Email delivery failed for record %s to %s: %s",
+                record_id,
+                recipient,
+                e,
+            )
+            await supabase_db.update_state(
+                supabase_url, service_key, table, record_id, "error"
+            )
+            return False
 
         # STEP[14]: Update state
         logger.info("STEP[14]: Updating state to completed terminal value")
@@ -854,9 +934,11 @@ async def run_batch_pipeline(filter_type: str, value: str) -> int:
                 logger.error(f"  Summarizer client error")
                 continue
 
-            summary_dict = client.summarize(transcript, timeout=get_summarizer_timeout())
+            summary_dict = summarize_transcript(client, transcript, f"Batch record {record_id}")
             if not summary_dict:
-                logger.error(f"  Summarization failed")
+                await supabase_db.update_state(
+                    supabase_url, service_key, table, record_id, "error"
+                )
                 continue
 
             # Render HTML
@@ -869,9 +951,21 @@ async def run_batch_pipeline(filter_type: str, value: str) -> int:
             # Send email
             logger.info(f"  Sending email...")
             recipient = get_email_recipient()
-            email_sender.send_summary_email(
-                gmail_service, recipient, get_email_subject(file_name), html
-            )
+            try:
+                email_sender.send_summary_email(
+                    gmail_service, recipient, get_email_subject(file_name), html
+                )
+            except Exception as e:
+                logger.exception(
+                    "  Email delivery failed for record %s to %s: %s",
+                    record_id,
+                    recipient,
+                    e,
+                )
+                await supabase_db.update_state(
+                    supabase_url, service_key, table, record_id, "error"
+                )
+                continue
 
             # Archive the Drive file after successful downstream processing.
             if not source_folder_id:

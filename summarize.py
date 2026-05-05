@@ -34,11 +34,17 @@ class SummarizerClient:
         self.base_url = base_url.rstrip("/") if base_url else None
         self.api_key = api_key
         self.model = model
+        self.last_error = None
         
         if self.provider not in ["docker", "lmstudio", "openrouter"]:
             raise ValueError(f"Unknown provider: {provider}. Must be docker, lmstudio, or openrouter.")
         
         logger.info(f"Initialized SummarizerClient: provider={self.provider}, model={self.model}")
+
+    def _record_error(self, message):
+        """Save and log the latest summarization failure reason."""
+        self.last_error = message
+        logger.error(message)
     
     def _get_endpoint(self):
         """
@@ -152,6 +158,7 @@ class SummarizerClient:
         endpoint = self._get_endpoint()
         headers = self._build_headers()
         body = self._build_request_body(transcript)
+        self.last_error = None
         
         logger.info(f"Sending summarization request to {self.provider} ({endpoint})")
         
@@ -164,12 +171,27 @@ class SummarizerClient:
             )
             response.raise_for_status()
             
-        except requests.Timeout:
-            logger.error(f"Summarization request timed out (>{timeout}s)")
+        except requests.Timeout as e:
+            self._record_error(
+                f"Summarization timed out after {timeout}s calling {endpoint}: {e}"
+            )
             return None
         
         except requests.RequestException as e:
-            logger.error(f"Summarization service error: {e}")
+            response = getattr(e, "response", None)
+            if response is not None:
+                status = getattr(response, "status_code", "unknown")
+                body_text = getattr(response, "text", "") or ""
+                self._record_error(
+                    "Summarization service error: "
+                    f"provider={self.provider}, endpoint={endpoint}, "
+                    f"status={status}, body={body_text[:500]}, exception={e}"
+                )
+            else:
+                self._record_error(
+                    "Summarization service error: "
+                    f"provider={self.provider}, endpoint={endpoint}, exception={e}"
+                )
             return None
         
         # Parse response
@@ -178,13 +200,15 @@ class SummarizerClient:
             
             # Extract message content (OpenAI-compatible format)
             if "choices" not in result or not result["choices"]:
-                logger.error("Invalid response structure: no choices")
+                self._record_error(
+                    "Invalid summarization response: missing choices array"
+                )
                 return None
             
             message = result["choices"][0].get("message", {}).get("content", "")
             
             if not message:
-                logger.error("Empty message content in response")
+                self._record_error("Invalid summarization response: empty message content")
                 return None
             
             # Parse JSON from message content
@@ -194,12 +218,16 @@ class SummarizerClient:
                 return summary_dict
             
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse summary JSON: {e}")
+                self._record_error(
+                    f"Failed to parse summary JSON: {e}; "
+                    f"content_preview={message[:500]}"
+                )
                 logger.debug(f"Message content: {message[:200]}")
                 return None
         
         except Exception as e:
-            logger.exception(f"Unexpected error during summarization: {e}")
+            self.last_error = f"Unexpected error during summarization: {e}"
+            logger.exception(self.last_error)
             return None
 
 

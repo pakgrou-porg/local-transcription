@@ -202,6 +202,99 @@ class TestRecoveryFlow:
         )
 
     @pytest.mark.asyncio
+    async def test_recovery_retries_email_for_error_with_saved_summary_and_html(
+        self, google_services
+    ):
+        saved_summary = {
+            "meeting_subject": "Recovered Meeting",
+            "speakers": ["Alice"],
+            "action_items": [],
+            "discussion_topics": [],
+            "resourcing": [],
+        }
+        jobs = [
+            {
+                "id": 6,
+                "file_name": "email-failed.mp3",
+                "drive_file_id": "file-456",
+                "transcript": "Transcript already stored",
+                "summary": json.dumps(saved_summary),
+                "html": "<html>cached</html>",
+                "state": "error",
+            }
+        ]
+
+        with patch(
+            "pipeline.auth.load_or_refresh_credentials", return_value=google_services
+        ), patch(
+            "pipeline.supabase_db.get_interrupted_jobs", new=AsyncMock(return_value=jobs)
+        ), patch(
+            "pipeline.drive.resolve_source_folder_id", return_value="source-folder"
+        ), patch(
+            "pipeline.archive_drive_file", new=AsyncMock(return_value=True)
+        ) as mock_archive, patch(
+            "pipeline.email_sender.send_summary_email"
+        ) as mock_email, patch(
+            "pipeline.supabase_db.update_state", new=AsyncMock(return_value=True)
+        ) as mock_update_state, patch(
+            "pipeline.summarize.build_from_env"
+        ) as mock_build, patch(
+            "pipeline.drive.download_file_from_archive"
+        ) as mock_download:
+            success = await pipeline.run_normal_pipeline()
+
+        assert success is True
+        mock_build.assert_not_called()
+        mock_download.assert_not_called()
+        mock_archive.assert_called_once()
+        mock_email.assert_called_once()
+        mock_update_state.assert_any_call(
+            "https://test.supabase.co", "service-key", "meetings", 6, "html"
+        )
+
+    @pytest.mark.asyncio
+    async def test_recovery_marks_email_failure_as_error(self, google_services):
+        saved_summary = {
+            "meeting_subject": "Recovered Meeting",
+            "speakers": [],
+            "action_items": [],
+            "discussion_topics": [],
+            "resourcing": [],
+        }
+        jobs = [
+            {
+                "id": 7,
+                "file_name": "email-still-failing.mp3",
+                "drive_file_id": "file-789",
+                "transcript": "Transcript already stored",
+                "summary": json.dumps(saved_summary),
+                "html": "<html>cached</html>",
+                "state": "error",
+            }
+        ]
+
+        with patch(
+            "pipeline.auth.load_or_refresh_credentials", return_value=google_services
+        ), patch(
+            "pipeline.supabase_db.get_interrupted_jobs", new=AsyncMock(return_value=jobs)
+        ), patch(
+            "pipeline.drive.resolve_source_folder_id", return_value="source-folder"
+        ), patch(
+            "pipeline.archive_drive_file", new=AsyncMock(return_value=True)
+        ), patch(
+            "pipeline.email_sender.send_summary_email",
+            side_effect=RuntimeError("Gmail down"),
+        ), patch(
+            "pipeline.supabase_db.update_state", new=AsyncMock(return_value=True)
+        ) as mock_update_state:
+            success = await pipeline.run_normal_pipeline()
+
+        assert success is False
+        mock_update_state.assert_any_call(
+            "https://test.supabase.co", "service-key", "meetings", 7, "error"
+        )
+
+    @pytest.mark.asyncio
     async def test_recovery_archive_failure_blocks_completion_and_email(self, google_services):
         jobs = [
             {

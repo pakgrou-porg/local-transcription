@@ -129,7 +129,7 @@ class TestRecoveryAndCleanup:
                 "id": 12,
                 "file_name": "meeting.mp3",
                 "drive_file_id": "file-123",
-                "transcript": "Transcript content long enough for validation",
+                "transcript": "Transcript content long enough for validation and summary recovery.",
                 "summary": None,
                 "html": None,
                 "state": "transcribed",

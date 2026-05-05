@@ -175,8 +175,9 @@ class TestQueries:
         ]
         error_rows = [
             {"id": 3, "state": "error", "transcript": "ok", "summary": None, "html": None},
-            {"id": 4, "state": "error", "transcript": None, "summary": None, "html": None},
+            {"id": 4, "state": "error", "transcript": None, "summary": None, "html": None, "drive_file_id": "drive-4"},
             {"id": 5, "state": "error", "transcript": "ok", "summary": "{}", "html": "<html/>"},
+            {"id": 6, "state": "error", "transcript": None, "summary": None, "html": None},
         ]
         query = make_query([])
         query.execute = AsyncMock(
@@ -193,7 +194,7 @@ class TestQueries:
                 "https://test.supabase.co", "service-key", "meetings"
             )
 
-        assert [record["id"] for record in jobs] == [1, 2, 3]
+        assert [record["id"] for record in jobs] == [1, 2, 3, 4, 5]
         assert query.eq.call_args_list[0].args == ("state", "transcribed")
         assert query.eq.call_args_list[1].args == ("state", "error")
 

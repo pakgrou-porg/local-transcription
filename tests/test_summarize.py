@@ -249,6 +249,7 @@ class TestSummarization:
             result = client.summarize("Test transcript")
             
             assert result is None
+            assert "Connection failed" in client.last_error
     
     def test_timeout_error_returns_none(self):
         """Test that timeout errors return None."""
@@ -258,6 +259,7 @@ class TestSummarization:
             result = client.summarize("Test transcript", timeout=5)
             
             assert result is None
+            assert "timed out after 5s" in client.last_error
     
     def test_invalid_json_response_returns_none(self):
         """Test that invalid JSON in response returns None."""
@@ -278,6 +280,8 @@ class TestSummarization:
             result = client.summarize("Test transcript")
             
             assert result is None
+            assert "Failed to parse summary JSON" in client.last_error
+            assert "Not valid JSON" in client.last_error
     
     def test_empty_message_returns_none(self):
         """Test that empty message content returns None."""
@@ -298,6 +302,7 @@ class TestSummarization:
             result = client.summarize("Test transcript")
             
             assert result is None
+            assert "empty message content" in client.last_error
 
 
 class TestBuildFromEnv:

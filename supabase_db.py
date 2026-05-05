@@ -353,9 +353,10 @@ async def get_interrupted_jobs(
 
     Recovery semantics:
     - Always include state='transcribed'
-    - Also include resumable state='error' rows where transcript exists and
-      summary/html delivery is incomplete. This lets startup recovery resume
-      after downstream dependency outages (e.g., summarizer/email service).
+    - Also include state='error' rows that have either transcript text or the
+      original Drive file ID. This lets startup recovery retry transcription,
+      summarization, rendering, archiving, email delivery, and final state
+      persistence after downstream dependency outages.
 
     Orders by created_at ASC to process oldest first.
     
@@ -386,8 +387,7 @@ async def get_interrupted_jobs(
         resumable_error_records = [
             record
             for record in error_records
-            if record.get("transcript")
-            and (not record.get("summary") or not record.get("html"))
+            if record.get("transcript") or record.get("drive_file_id")
         ]
 
         records = transcribed_records + resumable_error_records
