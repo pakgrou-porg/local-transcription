@@ -250,6 +250,53 @@ class TestSummarization:
             
             assert result is None
             assert "Connection failed" in client.last_error
+
+    def test_model_not_found_discovers_and_retries_model(self):
+        """Test that model-not-found errors trigger /v1/models discovery and retry."""
+        client = SummarizerClient(
+            provider="docker",
+            base_url="http://localhost:8100",
+            model="missing-model",
+        )
+
+        bad_response = MagicMock()
+        bad_response.status_code = 404
+        bad_response.text = "Model not found: missing-model"
+        http_error = requests.HTTPError("404 Client Error: Model not found")
+        http_error.response = bad_response
+        bad_response.raise_for_status.side_effect = http_error
+
+        models_response = MagicMock()
+        models_response.json.return_value = {
+            "data": [{"id": "missing-model"}, {"id": "working-model"}]
+        }
+
+        summary_json = {
+            "meeting_subject": "Recovered Model",
+            "speakers": [],
+            "action_items": [],
+            "discussion_topics": [],
+            "resourcing": [],
+        }
+        good_response = MagicMock()
+        good_response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(summary_json)}}]
+        }
+
+        with patch("requests.post", side_effect=[bad_response, good_response]) as mock_post, patch(
+            "requests.get", return_value=models_response
+        ) as mock_get:
+            result = client.summarize("Test transcript")
+
+        assert result["meeting_subject"] == "Recovered Model"
+        assert client.model == "working-model"
+        mock_get.assert_called_once_with(
+            "http://localhost:8100/v1/models",
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        assert mock_post.call_args_list[0].kwargs["json"]["model"] == "missing-model"
+        assert mock_post.call_args_list[1].kwargs["json"]["model"] == "working-model"
     
     def test_timeout_error_returns_none(self):
         """Test that timeout errors return None."""

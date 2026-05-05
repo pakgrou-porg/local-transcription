@@ -177,6 +177,42 @@ class TestTranscriptionService:
             
             assert result is None
             assert any("error" in record.message.lower() for record in caplog.records)
+
+    def test_model_not_found_discovers_and_retries_model(self, monkeypatch, synthetic_wav):
+        """
+        Test that model-not-found errors trigger /v1/models discovery and retry.
+        """
+        monkeypatch.setenv("TRANSCRIBE_BASE_URL", "http://localhost:8101")
+        monkeypatch.setenv("TRANSCRIBE_MODEL_ID", "missing-model")
+        monkeypatch.setenv("TRANSCRIBE_LANGUAGE", "en")
+        monkeypatch.setattr("transcribe._TRANSCRIBE_SELECTED_MODEL_ID", None)
+
+        bad_response = MagicMock()
+        bad_response.status_code = 404
+        bad_response.text = "Model not found: missing-model"
+        http_error = requests.HTTPError("404 Client Error: Model not found")
+        http_error.response = bad_response
+        bad_response.raise_for_status.side_effect = http_error
+
+        models_response = MagicMock()
+        models_response.json.return_value = {
+            "data": [{"id": "missing-model"}, {"id": "working-model"}]
+        }
+
+        good_response = MagicMock()
+        good_response.json.return_value = {
+            "text": "This is a valid fallback transcript with enough content to pass all verification checks."
+        }
+
+        with patch("requests.post", side_effect=[bad_response, good_response]) as mock_post, patch(
+            "requests.get", return_value=models_response
+        ) as mock_get:
+            result = transcribe_audio(str(synthetic_wav))
+
+        assert "valid fallback transcript" in result
+        mock_get.assert_called_once_with("http://localhost:8101/v1/models", timeout=30)
+        assert mock_post.call_args_list[0].kwargs["data"]["model"] == "missing-model"
+        assert mock_post.call_args_list[1].kwargs["data"]["model"] == "working-model"
     
     def test_timeout_returns_none_and_logs(self, monkeypatch, synthetic_wav, caplog):
         """

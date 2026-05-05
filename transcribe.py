@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
+_TRANSCRIBE_SELECTED_MODEL_ID = None
 
 
 class TranscriptionError(Exception):
@@ -180,18 +181,113 @@ def _content_type_for_path(audio_file_path):
     return "application/octet-stream"
 
 
-def _post_transcription_request(audio_file_path):
+def _models_endpoint(base_url):
+    """Return the OpenAI-compatible models endpoint for a service base URL."""
+    base_url = base_url.rstrip("/")
+    if base_url.endswith("/v1/audio/transcriptions"):
+        return base_url[: -len("/audio/transcriptions")] + "/models"
+    if base_url.endswith("/v1"):
+        return f"{base_url}/models"
+    return f"{base_url}/v1/models"
+
+
+def _extract_model_ids(payload):
+    """Extract model IDs from common OpenAI-compatible /v1/models responses."""
+    if isinstance(payload, dict):
+        models = payload.get("data", [])
+    elif isinstance(payload, list):
+        models = payload
+    else:
+        return []
+
+    model_ids = []
+    for model in models:
+        if isinstance(model, dict):
+            model_id = model.get("id") or model.get("name")
+        else:
+            model_id = str(model)
+        if model_id:
+            model_ids.append(model_id)
+    return model_ids
+
+
+def _looks_like_model_not_found(status_code, body_text, exception_text=""):
+    """Return True when the transcription service reports an unavailable model."""
+    text = f"{body_text or ''} {exception_text or ''}".lower()
+    if status_code not in {400, 404, 422}:
+        return False
+    return "model" in text and any(
+        marker in text
+        for marker in [
+            "not found",
+            "does not exist",
+            "not exist",
+            "not served",
+            "not available",
+            "unknown model",
+        ]
+    )
+
+
+def list_available_models(base_url, timeout=30):
+    """List available transcription model IDs from the service."""
+    endpoint = _models_endpoint(base_url)
+    try:
+        response = requests.get(endpoint, timeout=timeout)
+        response.raise_for_status()
+        model_ids = _extract_model_ids(response.json())
+    except Exception as e:
+        logger.error(f"Unable to list transcription models from {endpoint}: {e}")
+        return []
+
+    if not model_ids:
+        logger.error(f"No transcription models returned from {endpoint}")
+        return []
+
+    logger.info(f"Available transcription models: {model_ids}")
+    return model_ids
+
+
+def _send_transcription_request(audio_file_path, endpoint, model_id, language, timeout):
     """Send one audio file to transcription service and return transcript text."""
     audio_file_path = Path(audio_file_path)
 
+    with open(audio_file_path, "rb") as f:
+        files = {
+            "file": (audio_file_path.name, f, _content_type_for_path(audio_file_path)),
+        }
+        data = {
+            "model": model_id,
+            "language": language,
+        }
+
+        logger.info(
+            f"Sending transcription request to {endpoint} for {audio_file_path.name} "
+            f"using model {model_id}"
+        )
+
+        return requests.post(
+            endpoint,
+            files=files,
+            data=data,
+            timeout=timeout
+        )
+
+
+def _post_transcription_request(audio_file_path):
+    """Send one audio file to transcription service and return transcript text."""
+    global _TRANSCRIBE_SELECTED_MODEL_ID
+    audio_file_path = Path(audio_file_path)
+
     base_url = os.getenv("TRANSCRIBE_BASE_URL")
-    model_id = os.getenv("TRANSCRIBE_MODEL_ID")
+    configured_model_id = os.getenv("TRANSCRIBE_MODEL_ID")
+    model_id = _TRANSCRIBE_SELECTED_MODEL_ID or configured_model_id
     language = os.getenv("TRANSCRIBE_LANGUAGE")
     timeout = int(os.getenv("TRANSCRIBE_TIMEOUT_SECONDS", "300"))
 
     if not base_url:
         raise TranscriptionError("TRANSCRIBE_BASE_URL not set in .env")
-    if not model_id:
+    if not configured_model_id:
         raise TranscriptionError("TRANSCRIBE_MODEL_ID not set in .env")
     if not language:
         raise TranscriptionError("TRANSCRIBE_LANGUAGE not set in .env")
@@ -203,32 +299,51 @@ def _post_transcription_request(audio_file_path):
     endpoint = base_url.rstrip("/") + "/v1/audio/transcriptions"
 
     try:
-        with open(audio_file_path, "rb") as f:
-            files = {
-                "file": (audio_file_path.name, f, _content_type_for_path(audio_file_path)),
-            }
-            data = {
-                "model": model_id,
-                "language": language,
-            }
+        try:
+            response = _send_transcription_request(
+                audio_file_path, endpoint, model_id, language, timeout
+            )
+            response.raise_for_status()
 
-            logger.info(f"Sending transcription request to {endpoint} for {audio_file_path.name}")
+        except requests.Timeout:
+            logger.error(f"Transcription request timed out (>{timeout}s) for {audio_file_path.name}")
+            return None
 
-            try:
-                response = requests.post(
-                    endpoint,
-                    files=files,
-                    data=data,
-                    timeout=timeout
-                )
-                response.raise_for_status()
-
-            except requests.Timeout:
-                logger.error(f"Transcription request timed out (>{timeout}s) for {audio_file_path.name}")
+        except requests.RequestException as e:
+            response = getattr(e, "response", None)
+            status = getattr(response, "status_code", None)
+            body_text = getattr(response, "text", "") if response is not None else ""
+            if not _looks_like_model_not_found(status, body_text, str(e)):
+                logger.error(f"Transcription service error: {e}")
                 return None
 
-            except requests.RequestException as e:
-                logger.error(f"Transcription service error: {e}")
+            logger.warning(
+                "Transcription model %s was not found; attempting model discovery",
+                model_id,
+            )
+            for fallback_model in [
+                candidate
+                for candidate in list_available_models(base_url, timeout=min(timeout, 30))
+                if candidate != model_id
+            ]:
+                logger.info("Retrying transcription with discovered model: %s", fallback_model)
+                try:
+                    response = _send_transcription_request(
+                        audio_file_path, endpoint, fallback_model, language, timeout
+                    )
+                    response.raise_for_status()
+                    _TRANSCRIBE_SELECTED_MODEL_ID = fallback_model
+                    break
+                except requests.RequestException as fallback_error:
+                    logger.error(
+                        "Transcription fallback model failed: "
+                        f"model={fallback_model}, endpoint={endpoint}, exception={fallback_error}"
+                    )
+            else:
+                logger.error(
+                    "Transcription failed because model %s was unavailable and no discovered fallback worked",
+                    model_id,
+                )
                 return None
 
         try:
